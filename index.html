@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>NYC Subway Map</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Mono:wght@400;500&family=Outfit:wght@300;400;600&display=swap" rel="stylesheet"/>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg:     #0d0f14;
+      --panel:  #13161e;
+      --border: #1f2535;
+      --text:   #dde1ec;
+      --muted:  #5a6180;
+      --accent: #fccc0a;
+      --font-d: 'Bebas Neue', sans-serif;
+      --font-m: 'DM Mono', monospace;
+      --font-b: 'Outfit', sans-serif;
+    }
+    html, body { height: 100%; background: var(--bg); font-family: var(--font-b); color: var(--text); overflow: hidden; }
+    .app { display: grid; grid-template-rows: 52px 1fr; height: 100vh; }
+
+    header {
+      display: flex; align-items: center; gap: 14px;
+      padding: 0 20px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      z-index: 1000;
+    }
+    .logo { font-family: var(--font-d); font-size: 24px; letter-spacing: 3px; color: var(--accent); }
+    .logo em { color: #ff4b6e; font-style: normal; }
+    .tagline { font-family: var(--font-m); font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: #6b7280; box-shadow: 0 0 8px #6b728088; animation: blink 2s infinite; margin-left: auto; }
+    .dot-label { font-family: var(--font-m); font-size: 10px; color: var(--muted); }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+    #map { width: 100%; height: 100%; background: #0d0f14; }
+
+    /* Popup estación */
+    .leaflet-popup-content-wrapper {
+      background: var(--panel) !important;
+      border: 1px solid var(--border) !important;
+      border-radius: 10px !important;
+      box-shadow: 0 8px 32px rgba(0,0,0,.6) !important;
+      color: var(--text) !important;
+      padding: 0 !important;
+      min-width: 220px;
+    }
+    .leaflet-popup-tip { background: var(--panel) !important; }
+    .leaflet-popup-content { margin: 0 !important; }
+    .leaflet-popup-close-button {
+      color: var(--muted) !important; font-size: 18px !important;
+      top: 8px !important; right: 10px !important;
+    }
+    .popup-inner { padding: 14px 16px; }
+    .popup-name {
+      font-family: var(--font-d); font-size: 20px; letter-spacing: 1px;
+      color: var(--text); line-height: 1.1; margin-bottom: 2px;
+      padding-right: 20px;
+    }
+    .popup-borough {
+      font-family: var(--font-m); font-size: 10px; color: var(--muted);
+      text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px;
+    }
+    .popup-routes-label {
+      font-family: var(--font-m); font-size: 10px; color: var(--muted);
+      text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px;
+    }
+    .popup-badges { display: flex; flex-wrap: wrap; gap: 6px; }
+    .badge {
+      width: 30px; height: 30px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-family: var(--font-d); font-size: 14px; flex-shrink: 0;
+      cursor: pointer; transition: transform .15s;
+    }
+    .badge:hover { transform: scale(1.15); }
+
+    /* Tooltip de tramo */
+    .tramo-tooltip {
+      background: var(--panel) !important;
+      border: 1px solid var(--border) !important;
+      border-radius: 8px !important;
+      color: var(--text) !important;
+      padding: 0 !important;
+      box-shadow: 0 4px 20px rgba(0,0,0,.5) !important;
+      white-space: nowrap;
+      pointer-events: none;
+    }
+    .tramo-tooltip::before { display: none !important; }
+    .tt-inner { padding: 8px 12px; }
+    .tt-route { font-family: var(--font-d); font-size: 13px; letter-spacing: 1px; margin-bottom: 2px; }
+    .tt-stations { font-size: 11px; color: var(--muted); font-family: var(--font-m); margin-bottom: 4px; }
+    .tt-dist { font-family: var(--font-d); font-size: 22px; letter-spacing: 1px; }
+    .tt-unit { font-family: var(--font-m); font-size: 10px; color: var(--muted); margin-left: 3px; }
+
+    /* Leyenda */
+    #legend {
+      position: absolute; bottom: 28px; left: 12px;
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: 10px; padding: 10px 14px;
+      z-index: 900; font-family: var(--font-m); font-size: 10px;
+      color: var(--muted); line-height: 2; pointer-events: none;
+    }
+    #legend b { color: var(--text); }
+
+    #loading {
+      position: absolute; top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      font-family: var(--font-d); font-size: 18px; letter-spacing: 2px;
+      color: var(--muted); z-index: 2000; pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div>
+      <div class="logo">NYC <em>Subway</em></div>
+      <div class="tagline">Bases de datos espaciales · Proyecto #3</div>
+    </div>
+    <div class="dot" id="api-dot"></div>
+    <span class="dot-label" id="api-label">conectando...</span>
+  </header>
+  <div style="position:relative;overflow:hidden;">
+    <div id="map"></div>
+    <div id="loading">Cargando mapa...</div>
+    <div id="legend">
+      <b>●</b> Toca una estación → ver sus líneas<br>
+      <b>〰</b> Toca una línea → ver distancias por tramo
+    </div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const API = "https://unextraneous-unfugitively-yahir.ngrok-free.dev";
+
+// Header necesario para saltarse la pantalla de advertencia de ngrok
+function apiFetch(url) {
+  return fetch(url, { headers: { "ngrok-skip-browser-warning": "true" } });
+}
+const LIGHT_ROUTES = ["N","Q","R","W","L","S","SIR"];
+
+function textColor(r) { return LIGHT_ROUTES.includes(r.trim()) ? "#000" : "#fff"; }
+
+// ── MAPA ─────────────────────────────────────────────────
+const map = L.map("map", { zoomControl: false }).setView([40.728, -73.96], 11);
+L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+  attribution: "© OpenStreetMap © CARTO", maxZoom: 19
+}).addTo(map);
+L.control.zoom({ position: "bottomright" }).addTo(map);
+
+// Capas
+let grayLinesLayer  = L.layerGroup().addTo(map); // todas las rutas en gris
+let activeLineLayer = L.layerGroup().addTo(map); // ruta activa en color
+let tramoLayer      = L.layerGroup().addTo(map); // tramos invisibles con tooltip
+
+// ── LIMPIAR LÍNEAS ACTIVAS ────────────────────────────────
+function clearActive() {
+  activeLineLayer.clearLayers();
+  tramoLayer.clearLayers();
+}
+
+// Rutas sin geometría en RUTAS_nyc
+const SUSPENDED = {
+  "V": {
+    color: "#FF6319",
+    titulo: "Línea V — Fuera de servicio",
+    detalle: "Suspendida permanentemente en diciembre de 2010. El MTA eliminó esta línea al reestructurar el servicio en Queens. Sus estaciones fueron absorbidas por las líneas E, F y M."
+  },
+  "Z": {
+    color: "#996633",
+    titulo: "Línea Z — Servicio limitado",
+    detalle: "Opera solo en horas pico en dirección al centro (mañana) y hacia afuera (tarde). Comparte exactamente el mismo recorrido que la línea J, por lo que no tiene geometría independiente."
+  },
+};
+
+// ── ACTIVAR UNA RUTA COMPLETA ────────────────────────────
+async function activateRoute(routeId, routeLong, color) {
+  clearActive();
+
+  // Si la ruta está fuera de servicio, mostrar aviso y salir
+  if (SUSPENDED[routeId]) {
+    const info = SUSPENDED[routeId];
+    L.popup({ closeButton: true, maxWidth: 300 })
+      .setLatLng(map.getCenter())
+      .setContent(`
+        <div class="popup-inner">
+          <div class="popup-name" style="color:${info.color}">${routeId}</div>
+          <div class="popup-borough" style="margin-bottom:10px;color:${info.color};font-family:var(--font-m);font-size:11px;text-transform:uppercase;letter-spacing:1px">${info.titulo}</div>
+          <div style="font-family:var(--font-m);font-size:11px;color:var(--muted);line-height:1.8">${info.detalle}</div>
+        </div>
+      `)
+      .openOn(map);
+    return;
+  }
+
+  try {
+    // Dibuja la línea real en color sobre las grises
+    const resG = await apiFetch(`${API}/route/${routeId}/geojson`);
+    if (!resG.ok) return;
+    const dataG = await resG.json();
+
+    L.geoJSON(dataG.geojson, {
+      style: { color, weight: 6, opacity: 1, lineJoin: "round", lineCap: "round" }
+    }).addTo(activeLineLayer);
+
+    // Pide distancias y dibuja tramos invisibles con tooltip
+    const resD = await apiFetch(`${API}/route/${routeId}/distances`);
+    if (!resD.ok) return;
+    const dataD = await resD.json();
+
+    dataD.segments.forEach(seg => {
+      const dist = Math.round(seg.distance_m);
+      const tramo = L.polyline(
+        [[seg.lat_from, seg.lon_from], [seg.lat_to, seg.lon_to]],
+        { color: "transparent", weight: 20, opacity: 0 }
+      );
+      tramo.bindTooltip(`
+        <div class="tt-inner">
+          <div class="tt-route" style="color:${color}">
+            Línea ${routeId} — ${routeLong}
+          </div>
+          <div class="tt-stations">${seg.station_from} → ${seg.station_to}</div>
+          <div>
+            <span class="tt-dist" style="color:${color}">${dist}</span>
+            <span class="tt-unit">metros</span>
+          </div>
+        </div>
+      `, { className: "tramo-tooltip", sticky: true, opacity: 1, direction: "top", offset: [0,-6] });
+      tramo.addTo(tramoLayer);
+    });
+  } catch(e) {
+    console.error("Error activando ruta", routeId, e);
+  }
+}
+
+// ── CARGAR TODAS LAS RUTAS EN GRIS ───────────────────────
+async function loadGrayRoutes(routesMap) {
+  const res  = await apiFetch(`${API}/routes/all`);
+  const data = await res.json();
+
+  data.routes.forEach(route => {
+    // Guarda info de la ruta para usarla al hacer clic
+    routesMap[route.route_shor] = route;
+    routesMap[route.route_id]   = route;
+
+    // Dibuja en gris muy tenue como fondo
+    const grayLine = L.geoJSON(route.geojson, {
+      style: {
+        color: "#444c60",
+        weight: 3,
+        opacity: 0.5,
+        lineJoin: "round",
+        lineCap: "round",
+      }
+    });
+
+    // Al tocar la línea gris → activar con su color real
+    grayLine.on("click", () => {
+      activateRoute(route.route_shor, route.route_long, route.color);
+    });
+
+    grayLine.addTo(grayLinesLayer);
+  });
+}
+
+// ── CARGAR ESTACIONES ─────────────────────────────────────
+async function loadStations(routesMap) {
+  const res  = await apiFetch(`${API}/stations`);
+  const data = await res.json();
+
+  document.getElementById("api-dot").style.background = "#00933c";
+  document.getElementById("api-dot").style.boxShadow  = "0 0 8px #00933c88";
+  document.getElementById("api-label").textContent = `${data.stations.length} estaciones`;
+
+  data.stations.forEach(station => {
+    if (!station.lat || !station.lon) return;
+
+    const stColor = "#" + (station.color || "888888");
+    const routes  = station.routes
+      ? station.routes.split(",").map(r => r.trim())
+      : [];
+
+    // Marcador con color real de la primera ruta
+    const icon = L.divIcon({
+      className: "",
+      html: `<div style="
+        width:10px; height:10px; border-radius:50%;
+        background:${stColor};
+        border:2px solid #0d0f14;
+        transition: transform .15s;
+      "></div>`,
+      iconSize: [10,10], iconAnchor: [5,5],
+    });
+
+    // Badges con colores reales desde routesMap
+    const badges = routes.map(r => {
+      const info  = routesMap[r] || {};
+      const bg    = info.color || "#888888";
+      const txt   = textColor(r);
+      return `<div class="badge" style="background:${bg};color:${txt}"
+                   onclick="activateRoute('${r}','${(info.route_long||r).replace(/'/g,"\\'")}','${bg}')"
+              >${r}</div>`;
+    }).join("");
+
+    const popupContent = `
+      <div class="popup-inner">
+        <div class="popup-name">${station.name}</div>
+        <div class="popup-borough">${station.borough || "Sin distrito"}</div>
+        ${routes.length > 0
+          ? `<div class="popup-routes-label">Líneas que pasan</div>
+             <div class="popup-badges">${badges}</div>`
+          : `<div style="font-family:var(--font-m);font-size:10px;color:var(--muted)">AirTrain / sin ruta subway</div>`
+        }
+      </div>
+    `;
+
+    const marker = L.marker([station.lat, station.lon], { icon })
+      .bindPopup(popupContent, { maxWidth: 300, closeButton: true })
+      .addTo(map);
+
+    // Al abrir popup → activar la primera ruta de la estación
+    marker.on("popupopen", () => {
+      if (routes.length > 0) {
+        const firstRoute = routesMap[routes[0]];
+        if (firstRoute) {
+          activateRoute(
+            firstRoute.route_shor,
+            firstRoute.route_long,
+            firstRoute.color
+          );
+        }
+      }
+    });
+
+    // Al cerrar popup → limpiar líneas activas
+    marker.on("popupclose", () => clearActive());
+  });
+}
+
+// ── INIT ─────────────────────────────────────────────────
+async function init() {
+  try {
+    const routesMap = {}; // route_id/route_shor → info completa
+    await loadGrayRoutes(routesMap);
+    await loadStations(routesMap);
+    document.getElementById("loading").style.display = "none";
+  } catch(e) {
+    document.getElementById("loading").textContent = "Error conectando al API";
+    document.getElementById("api-dot").style.background = "#ff4b6e";
+    document.getElementById("api-label").textContent = "sin conexión";
+    console.error(e);
+  }
+}
+
+init();
+</script>
+</body>
+</html>
